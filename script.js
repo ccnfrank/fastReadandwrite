@@ -24,6 +24,8 @@ const docSave = document.getElementById("doc-save");
 const docClose = document.getElementById("doc-close");
 const docFind = document.getElementById("doc-find");
 const docFindCount = document.getElementById("doc-find-count");
+const docFontDown = document.getElementById("doc-font-down");
+const docFontUp = document.getElementById("doc-font-up");
 const docFindRow = document.getElementById("doc-find-row");
 const docProtect = document.getElementById("doc-protect");
 const docLock = document.getElementById("doc-lock");
@@ -690,3 +692,21 @@ docEditor.addEventListener("keydown", (event) => {
 docClose.addEventListener("click", () => {
   docDialog.close();
 });
+
+// ---- Tamanho da fonte na janela de leitura ----
+
+const DOC_FONT_MIN = 11;
+const DOC_FONT_MAX = 28;
+let docFontSize = 15;
+
+function setDocFontSize(size) {
+  docFontSize = Math.min(DOC_FONT_MAX, Math.max(DOC_FONT_MIN, size));
+  docDialog.style.setProperty("--doc-font-size", `${docFontSize}px`);
+  docFontDown.disabled = docFontSize <= DOC_FONT_MIN;
+  docFontUp.disabled = docFontSize >= DOC_FONT_MAX;
+}
+
+// O tamanho escolhido vale para todos os arquivos abertos nesta sessão.
+docFontDown.addEventListener("click", () => setDocFontSize(docFontSize - 1));
+docFontUp.addEventListener("click", () => setDocFontSize(docFontSize + 1));
+setDocFontSize(docFontSize);

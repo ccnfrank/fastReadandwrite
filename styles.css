@@ -225,6 +225,7 @@ button {
    Document window — sized to its content, capped by the viewport
    ========================================================================== */
 .doc-dialog {
+  --doc-font-size: 15px;
   width: min(700px, 94vw);
   max-height: min(600px, 85vh);
   margin: auto;
@@ -273,10 +274,6 @@ button {
     padding: 4px 16px 20px;
   }
 
-  .doc-dialog__text,
-  .doc-dialog__editor {
-    font-size: 14px;
-  }
 }
 
 .doc-dialog__header {
@@ -497,7 +494,7 @@ button {
   overflow-y: auto;
   background: var(--bg);
   color: var(--text);
-  font-size: 15px;
+  font-size: var(--doc-font-size);
   line-height: 1.65;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
@@ -537,8 +534,41 @@ button {
   padding: 4px 20px 24px;
 }
 
+.doc-dialog__size {
+  flex: 0 0 auto;
+  display: flex;
+  gap: 4px;
+  margin-left: auto;
+}
+
+.doc-dialog__size-btn {
+  min-width: 34px;
+  height: 30px;
+  padding: 0 8px;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  background: var(--overlay-1);
+  transition: background-color 160ms ease;
+}
+
+.doc-dialog__size-btn:hover:not(:disabled) {
+  background: var(--overlay-2);
+}
+
+.doc-dialog__size-btn:disabled {
+  color: var(--text-placeholder);
+  cursor: default;
+}
+
+.doc-dialog__size-btn:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
 .doc-dialog__text {
-  font-size: 15px;
+  font-size: var(--doc-font-size);
   line-height: 1.65;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
