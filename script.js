@@ -9,6 +9,7 @@
 const folderBtn = document.getElementById("folder-btn");
 const folderInput = document.getElementById("folder-input");
 const fileCount = document.getElementById("file-count");
+const folderNameLabel = document.getElementById("folder-name");
 const searchInput = document.getElementById("search-input");
 const results = document.getElementById("results");
 const newBtn = document.getElementById("new-btn");
@@ -138,6 +139,10 @@ async function loadFolder(folderName, entries, dirHandle) {
   rootHandle = dirHandle;
   folderBtn.setAttribute("aria-label", `Diretório escolhido: ${folderName}`);
   folderBtn.title = folderName;
+
+  folderNameLabel.textContent = folderName;
+  folderNameLabel.title = folderName;
+  folderNameLabel.hidden = false;
 
   const total = entries.length;
   fileCount.textContent = total === 1
