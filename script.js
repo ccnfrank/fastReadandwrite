@@ -28,6 +28,7 @@ const docFontDown = document.getElementById("doc-font-down");
 const docFontUp = document.getElementById("doc-font-up");
 const docFindRow = document.getElementById("doc-find-row");
 const docProtect = document.getElementById("doc-protect");
+const docEditTools = document.getElementById("doc-edit-tools");
 const docLock = document.getElementById("doc-lock");
 const docLockText = document.getElementById("doc-lock-text");
 const docLockPass = document.getElementById("doc-lock-pass");
@@ -419,25 +420,34 @@ function showReading() {
     docText.innerHTML = currentDoc.html;
   }
   docText.hidden = false;
-  docToolbar.hidden = true;
+  docToolbar.hidden = false;
+  docEditTools.hidden = true;
   docEditor.hidden = true;
   docEdit.hidden = false;
   docCancel.hidden = true;
   docSave.hidden = true;
-  docProtect.hidden = false;
-  docProtect.textContent = currentDoc.password ? "Alterar senha" : "Proteger";
+  updateLockButton();
   applyFind();
+}
+
+// Cadeado: aberto se o arquivo não tem senha, fechado se tem.
+function updateLockButton() {
+  const isLocked = Boolean(currentDoc.password);
+  docProtect.classList.toggle("is-locked", isLocked);
+  const label = isLocked ? "Alterar senha" : "Proteger com senha";
+  docProtect.title = label;
+  docProtect.setAttribute("aria-label", label);
 }
 
 function startEditing() {
   docEditor.innerHTML = currentDoc.html;
   docText.hidden = true;
   docToolbar.hidden = false;
+  docEditTools.hidden = false;
   docEditor.hidden = false;
   docEdit.hidden = true;
   docCancel.hidden = false;
   docSave.hidden = false;
-  docProtect.hidden = true;
   docEditor.focus();
   updateFormatState();
   applyFind();
@@ -457,7 +467,6 @@ function showLockPanel(mode) {
   docEdit.hidden = true;
   docCancel.hidden = true;
   docSave.hidden = true;
-  docProtect.hidden = true;
 
   docLockPass.value = "";
   docLockConfirm.value = "";
@@ -471,7 +480,13 @@ function showLockPanel(mode) {
   docLockPass.focus();
 }
 
-docProtect.addEventListener("click", () => showLockPanel("set"));
+docProtect.addEventListener("click", () => {
+  // Abrir o painel de senha fecha o editor; edições não salvas seriam perdidas.
+  if (!docEditor.hidden && !window.confirm("Descartar as alterações não salvas para proteger o arquivo?")) {
+    return;
+  }
+  showLockPanel("set");
+});
 
 docLockCancel.addEventListener("click", () => {
   if (lockMode === "unlock") {

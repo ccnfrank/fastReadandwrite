@@ -469,6 +469,49 @@ button {
   text-decoration-thickness: 1.5px;
 }
 
+.doc-dialog__edit-tools {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.doc-dialog__icon-btn {
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border-radius: 8px;
+  color: var(--text-muted);
+  transition: background-color 160ms ease, color 160ms ease;
+}
+
+.doc-dialog__icon-btn:hover {
+  background: var(--overlay-1);
+  color: var(--text);
+}
+
+.doc-dialog__icon-btn:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+/* Open padlock when unprotected, closed padlock when protected */
+.doc-dialog__lock-icon--closed {
+  display: none;
+}
+
+.doc-dialog__icon-btn.is-locked {
+  color: var(--text);
+}
+
+.doc-dialog__icon-btn.is-locked .doc-dialog__lock-icon--open {
+  display: none;
+}
+
+.doc-dialog__icon-btn.is-locked .doc-dialog__lock-icon--closed {
+  display: block;
+}
+
 .doc-dialog__select {
   height: 34px;
   padding: 0 8px;
