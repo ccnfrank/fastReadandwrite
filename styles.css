@@ -469,6 +469,23 @@ button {
   text-decoration-thickness: 1.5px;
 }
 
+.doc-dialog__select {
+  height: 34px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 8px;
+  background: var(--overlay-1);
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.doc-dialog__select:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
 .doc-dialog__format:hover {
   background: var(--overlay-1);
   color: var(--text);

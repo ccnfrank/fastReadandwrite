@@ -44,6 +44,7 @@ const TAG_PATTERN = /(?:^|\s)#([\p{L}\p{N}_-]+)/gu;
 // Única formatação permitida no texto editado.
 const ALLOWED_TAGS = new Set(["B", "I", "U", "S", "STRIKE", "DEL", "BR", "DIV", "P"]);
 const ALIGNMENT_PATTERN = /text-align:\s*(left|center|right|justify)/i;
+const FONT_SIZE_PATTERN = /font-size:\s*(\d+(?:\.\d+)?)px/i;
 const CAN_PICK_WRITABLE_FOLDER = typeof window.showDirectoryPicker === "function";
 const CAN_SAVE_FILE = typeof window.showSaveFilePicker === "function";
 // Primeira linha de um arquivo protegido por senha. O restante é o conteúdo cifrado.
@@ -331,16 +332,24 @@ function cleanNode(parent) {
       continue;
     }
     cleanNode(node);
-    if (ALLOWED_TAGS.has(node.tagName)) {
-      const alignment = (node.getAttribute("style") || "").match(ALIGNMENT_PATTERN);
-      for (const attr of Array.from(node.attributes)) {
-        node.removeAttribute(attr.name);
-      }
-      if (alignment) {
-        node.setAttribute("style", `text-align: ${alignment[1].toLowerCase()}`);
-      }
-    } else {
+    const style = node.getAttribute("style") || "";
+    const alignment = style.match(ALIGNMENT_PATTERN);
+    const fontSize = style.match(FONT_SIZE_PATTERN);
+
+    // <span> só é mantido quando guarda um tamanho de fonte.
+    const keep = ALLOWED_TAGS.has(node.tagName) || (node.tagName === "SPAN" && fontSize);
+    if (!keep) {
       node.replaceWith(...node.childNodes);
+      continue;
+    }
+
+    for (const attr of Array.from(node.attributes)) {
+      node.removeAttribute(attr.name);
+    }
+    if (alignment) {
+      node.setAttribute("style", `text-align: ${alignment[1].toLowerCase()}`);
+    } else if (fontSize) {
+      node.setAttribute("style", `font-size: ${fontSize[1]}px`);
     }
   }
 }
@@ -676,6 +685,39 @@ docToolbar.addEventListener("click", (event) => {
   docEditor.focus();
   document.execCommand(button.dataset.command);
   updateFormatState();
+});
+
+// ---- Tamanho da fonte do texto editado ----
+
+const docFontSizeSelect = document.getElementById("doc-font-size");
+let savedSelection = null;
+
+// Guarda o trecho selecionado dentro do editor, pois o select tira o foco ao ser aberto.
+document.addEventListener("selectionchange", () => {
+  const selection = window.getSelection();
+  if (selection.rangeCount > 0 && docEditor.contains(selection.anchorNode)) {
+    savedSelection = selection.getRangeAt(0).cloneRange();
+  }
+});
+
+docFontSizeSelect.addEventListener("change", () => {
+  const size = docFontSizeSelect.value;
+  if (!savedSelection) return;
+
+  docEditor.focus();
+  const selection = window.getSelection();
+  selection.removeAllRanges();
+  selection.addRange(savedSelection);
+
+  // Marca o trecho com um tamanho provisório e troca por <span> com o tamanho exato.
+  document.execCommand("fontSize", false, "7");
+  for (const font of Array.from(docEditor.querySelectorAll('font[size="7"]'))) {
+    const span = document.createElement("span");
+    span.style.fontSize = `${size}px`;
+    span.append(...font.childNodes);
+    font.replaceWith(span);
+  }
+  savedSelection = null;
 });
 
 docEditor.addEventListener("keyup", updateFormatState);
