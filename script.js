@@ -111,19 +111,24 @@ folderInput.addEventListener("change", async () => {
   const folderName = files[0].webkitRelativePath.split("/")[0];
   const entries = files
     .filter((file) => DOCUMENT_PATTERN.test(file.name))
-    .map((file) => ({ file, handle: null }));
+    .map((file) => ({
+      file,
+      handle: null,
+      // Caminho dentro da pasta escolhida, sem o nome da própria pasta.
+      path: file.webkitRelativePath.split("/").slice(1).join("/"),
+    }));
   // Sem permissão de escrita neste navegador: a pasta é só para leitura.
   await loadFolder(folderName, entries, null);
 });
 
 // Percorre a pasta e as subpastas e devolve os documentos suportados.
-async function collectFromHandle(dirHandle) {
+async function collectFromHandle(dirHandle, prefix = "") {
   const found = [];
   for await (const entry of dirHandle.values()) {
     if (entry.kind === "directory") {
-      found.push(...(await collectFromHandle(entry)));
+      found.push(...(await collectFromHandle(entry, `${prefix}${entry.name}/`)));
     } else if (DOCUMENT_PATTERN.test(entry.name)) {
-      found.push({ file: await entry.getFile(), handle: entry });
+      found.push({ file: await entry.getFile(), handle: entry, path: `${prefix}${entry.name}` });
     }
   }
   return found;
@@ -142,9 +147,10 @@ async function loadFolder(folderName, entries, dirHandle) {
 
   // Lê o conteúdo de cada documento. O token evita resultados de uma escolha antiga.
   const token = ++loadToken;
-  const loaded = await Promise.all(entries.map(async ({ file, handle }) => ({
+  const loaded = await Promise.all(entries.map(async ({ file, handle, path }) => ({
     ...(await readDocument(file)),
     handle,
+    path,
   })));
   if (token !== loadToken) return;
 
@@ -357,7 +363,7 @@ function cleanNode(parent) {
 
 function matchesDocument(doc, term) {
   return (
-    doc.name.toLowerCase().includes(term) ||
+    (doc.path || doc.name).toLowerCase().includes(term) ||
     doc.text.includes(term) ||
     doc.tags.some((tag) => tag.includes(term))
   );
@@ -385,7 +391,20 @@ function renderResults(query) {
       const button = document.createElement("button");
       button.type = "button";
       button.className = "results__item";
-      button.textContent = doc.name;
+      const name = document.createElement("span");
+      name.className = "results__name";
+      name.textContent = doc.name;
+      button.append(name);
+
+      // Mostra a subpasta onde o arquivo está, quando houver.
+      const path = doc.path || "";
+      const folder = path.includes("/") ? path.slice(0, path.lastIndexOf("/")) : "";
+      if (folder) {
+        const location = document.createElement("span");
+        location.className = "results__path";
+        location.textContent = folder;
+        button.append(location);
+      }
       button.addEventListener("click", () => openDocument(doc));
       item.append(button);
       results.append(item);
