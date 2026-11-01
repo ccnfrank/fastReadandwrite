@@ -567,6 +567,21 @@ button {
   width: 136px;
 }
 
+.doc-dialog__color {
+  width: 34px;
+  height: 34px;
+  padding: 3px;
+  border: 0;
+  border-radius: 8px;
+  background: var(--overlay-1);
+  cursor: pointer;
+}
+
+.doc-dialog__color:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
 .doc-dialog__select:focus-visible {
   outline: 2px solid var(--ring);
   outline-offset: 2px;

@@ -48,6 +48,8 @@ const ALLOWED_TAGS = new Set(["B", "I", "U", "S", "STRIKE", "DEL", "BR", "DIV", 
 const ALIGNMENT_PATTERN = /text-align:\s*(left|center|right|justify)/i;
 const FONT_SIZE_PATTERN = /font-size:\s*(\d+(?:\.\d+)?)px/i;
 const FONT_FAMILY_PATTERN = /font-family:\s*([^;]+)/i;
+// Cor só em hexadecimal; "background-color" não conta.
+const TEXT_COLOR_PATTERN = /(?:^|;)\s*color:\s*(#[0-9a-f]{3,8})\b/i;
 const CAN_PICK_WRITABLE_FOLDER = typeof window.showDirectoryPicker === "function";
 const CAN_SAVE_FILE = typeof window.showSaveFilePicker === "function";
 // Primeira linha de um arquivo protegido por senha. O restante é o conteúdo cifrado.
@@ -349,9 +351,10 @@ function cleanNode(parent) {
     const alignment = style.match(ALIGNMENT_PATTERN);
     const fontSize = style.match(FONT_SIZE_PATTERN);
     const fontFamily = style.match(FONT_FAMILY_PATTERN);
+    const textColor = style.match(TEXT_COLOR_PATTERN);
 
-    // <span> só é mantido quando guarda tamanho ou tipo de fonte.
-    const isFontSpan = node.tagName === "SPAN" && (fontSize || fontFamily);
+    // <span> só é mantido quando guarda tamanho, tipo ou cor da fonte.
+    const isFontSpan = node.tagName === "SPAN" && (fontSize || fontFamily || textColor);
     const keep = ALLOWED_TAGS.has(node.tagName) || isFontSpan;
     if (!keep) {
       node.replaceWith(...node.childNodes);
@@ -368,6 +371,7 @@ function cleanNode(parent) {
       const family = fontFamily[1].replace(/[^\p{L}\p{N} ,-]/gu, "").trim();
       if (family) declarations.push(`font-family: ${family}`);
     }
+    if (textColor) declarations.push(`color: ${textColor[1].toLowerCase()}`);
     if (declarations.length > 0) {
       node.setAttribute("style", declarations.join("; "));
     }
@@ -786,6 +790,30 @@ docFontFamilySelect.addEventListener("change", () => {
   for (const font of Array.from(docEditor.querySelectorAll(`font[face="${TEMP_FONT_FACE}"]`))) {
     const span = document.createElement("span");
     span.style.fontFamily = family;
+    span.append(...font.childNodes);
+    font.replaceWith(span);
+  }
+  savedSelection = null;
+});
+
+// ---- Cor do texto editado ----
+
+const docTextColorInput = document.getElementById("doc-text-color");
+
+docTextColorInput.addEventListener("change", () => {
+  const color = docTextColorInput.value;
+  if (!savedSelection) return;
+
+  docEditor.focus();
+  const selection = window.getSelection();
+  selection.removeAllRanges();
+  selection.addRange(savedSelection);
+
+  // Marca o trecho com uma cor provisória (pela própria cor escolhida) e troca por <span> com estilo.
+  document.execCommand("foreColor", false, color);
+  for (const font of Array.from(docEditor.querySelectorAll("font[color]"))) {
+    const span = document.createElement("span");
+    span.style.color = color;
     span.append(...font.childNodes);
     font.replaceWith(span);
   }
