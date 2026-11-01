@@ -563,6 +563,10 @@ button {
   cursor: pointer;
 }
 
+.doc-dialog__select--font {
+  width: 136px;
+}
+
 .doc-dialog__select:focus-visible {
   outline: 2px solid var(--ring);
   outline-offset: 2px;

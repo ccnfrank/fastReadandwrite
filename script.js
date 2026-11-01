@@ -47,6 +47,7 @@ const TAG_PATTERN = /(?:^|\s)#([\p{L}\p{N}_-]+)/gu;
 const ALLOWED_TAGS = new Set(["B", "I", "U", "S", "STRIKE", "DEL", "BR", "DIV", "P"]);
 const ALIGNMENT_PATTERN = /text-align:\s*(left|center|right|justify)/i;
 const FONT_SIZE_PATTERN = /font-size:\s*(\d+(?:\.\d+)?)px/i;
+const FONT_FAMILY_PATTERN = /font-family:\s*([^;]+)/i;
 const CAN_PICK_WRITABLE_FOLDER = typeof window.showDirectoryPicker === "function";
 const CAN_SAVE_FILE = typeof window.showSaveFilePicker === "function";
 // Primeira linha de um arquivo protegido por senha. O restante é o conteúdo cifrado.
@@ -347,9 +348,11 @@ function cleanNode(parent) {
     const style = node.getAttribute("style") || "";
     const alignment = style.match(ALIGNMENT_PATTERN);
     const fontSize = style.match(FONT_SIZE_PATTERN);
+    const fontFamily = style.match(FONT_FAMILY_PATTERN);
 
-    // <span> só é mantido quando guarda um tamanho de fonte.
-    const keep = ALLOWED_TAGS.has(node.tagName) || (node.tagName === "SPAN" && fontSize);
+    // <span> só é mantido quando guarda tamanho ou tipo de fonte.
+    const isFontSpan = node.tagName === "SPAN" && (fontSize || fontFamily);
+    const keep = ALLOWED_TAGS.has(node.tagName) || isFontSpan;
     if (!keep) {
       node.replaceWith(...node.childNodes);
       continue;
@@ -358,10 +361,15 @@ function cleanNode(parent) {
     for (const attr of Array.from(node.attributes)) {
       node.removeAttribute(attr.name);
     }
-    if (alignment) {
-      node.setAttribute("style", `text-align: ${alignment[1].toLowerCase()}`);
-    } else if (fontSize) {
-      node.setAttribute("style", `font-size: ${fontSize[1]}px`);
+    const declarations = [];
+    if (alignment) declarations.push(`text-align: ${alignment[1].toLowerCase()}`);
+    if (fontSize) declarations.push(`font-size: ${fontSize[1]}px`);
+    if (fontFamily) {
+      const family = fontFamily[1].replace(/[^\p{L}\p{N} ,-]/gu, "").trim();
+      if (family) declarations.push(`font-family: ${family}`);
+    }
+    if (declarations.length > 0) {
+      node.setAttribute("style", declarations.join("; "));
     }
   }
 }
@@ -753,6 +761,31 @@ docFontSizeSelect.addEventListener("change", () => {
   for (const font of Array.from(docEditor.querySelectorAll('font[size="7"]'))) {
     const span = document.createElement("span");
     span.style.fontSize = `${size}px`;
+    span.append(...font.childNodes);
+    font.replaceWith(span);
+  }
+  savedSelection = null;
+});
+
+// ---- Tipo de fonte do texto editado ----
+
+const docFontFamilySelect = document.getElementById("doc-font-family");
+const TEMP_FONT_FACE = "infopanel-temp";
+
+docFontFamilySelect.addEventListener("change", () => {
+  const family = docFontFamilySelect.value;
+  if (!savedSelection) return;
+
+  docEditor.focus();
+  const selection = window.getSelection();
+  selection.removeAllRanges();
+  selection.addRange(savedSelection);
+
+  // Marca o trecho com uma fonte provisória e troca por <span> com a fonte escolhida.
+  document.execCommand("fontName", false, TEMP_FONT_FACE);
+  for (const font of Array.from(docEditor.querySelectorAll(`font[face="${TEMP_FONT_FACE}"]`))) {
+    const span = document.createElement("span");
+    span.style.fontFamily = family;
     span.append(...font.childNodes);
     font.replaceWith(span);
   }
