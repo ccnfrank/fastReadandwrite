@@ -207,6 +207,11 @@ function uniqueName(base, extension) {
   return name;
 }
 
+// Nome sugerido ao salvar um arquivo existente: mesmo nome, com extensão .rtf.
+function suggestedRtfName(name) {
+  return `${name.replace(/\.[^.]+$/, "")}.rtf`;
+}
+
 function mimeTypeFor(name) {
   if (isHtmlName(name)) return "text/html";
   if (RTF_PATTERN.test(name)) return "application/rtf";
@@ -227,8 +232,8 @@ function downloadFile(file) {
 
 // Navegadores sem "salvar como": pede o nome, abre a folha de compartilhamento
 // (no iPhone, "Salvar em Arquivos") ou baixa o arquivo.
-async function saveWithShareOrDownload(doc, html) {
-  const typed = window.prompt("Nome do arquivo (.html, .rtf, .md ou .txt):", doc.name);
+async function saveWithShareOrDownload(doc, html, suggestedName = doc.name) {
+  const typed = window.prompt("Nome do arquivo (.html, .rtf, .md ou .txt):", suggestedName);
   if (typed === null || typed.trim() === "") return false;
   const fileName = /\.(html|rtf|md|txt)$/i.test(typed.trim()) ? typed.trim() : `${typed.trim()}.html`;
 
@@ -251,20 +256,20 @@ async function saveWithShareOrDownload(doc, html) {
   doc.handle = null;
   doc.isNew = false;
   createdDocs = createdDocs.filter((item) => item !== doc);
-  documents.push(doc);
+  if (!documents.includes(doc)) documents.push(doc);
   return true;
 }
 
 // Pergunta onde salvar (janela do sistema com pasta e nome) e grava o arquivo novo.
-async function saveNewDocument(doc, html) {
+async function saveNewDocument(doc, html, suggestedName = doc.name) {
   if (!CAN_SAVE_FILE) {
-    return saveWithShareOrDownload(doc, html);
+    return saveWithShareOrDownload(doc, html, suggestedName);
   }
 
   let handle;
   try {
     handle = await window.showSaveFilePicker({
-      suggestedName: doc.name,
+      suggestedName,
       startIn: rootHandle || "documents",
       types: [
         { description: "Página HTML", accept: { "text/html": [".html"] } },
@@ -288,7 +293,7 @@ async function saveNewDocument(doc, html) {
   doc.handle = handle;
   doc.isNew = false;
   createdDocs = createdDocs.filter((item) => item !== doc);
-  documents.push(doc);
+  if (!documents.includes(doc)) documents.push(doc);
   return true;
 }
 
@@ -968,19 +973,19 @@ async function saveEdit() {
   const plain = docEditor.innerText;
   Object.assign(currentDoc, indexText(plain), { html });
 
-  // Arquivo novo: só é considerado salvo quando gravado na pasta escolhida.
-  // Arquivos .html e protegidos da pasta são gravados no disco com a formatação.
-  // Os demais (.txt, .md, .rtf) ficam só na memória da página.
+  // Arquivo novo: só é considerado salvo quando gravado no local escolhido.
+  // Arquivo que já existe: pergunta se as alterações devem ser salvas; o padrão é .rtf.
   if (currentDoc.isNew) {
     const saved = await saveNewDocument(currentDoc, html);
     if (!saved) return;
-  } else if (currentDoc.handle && (currentDoc.password || keepsFormatting(currentDoc.name))) {
-    try {
-      await writeDocument(currentDoc, html);
-    } catch (error) {
-      alert("Não foi possível gravar o arquivo protegido.");
-      return;
-    }
+  } else {
+    const suggested = suggestedRtfName(currentDoc.name);
+    const confirmed = window.confirm(
+      `Salvar as alterações? O arquivo será salvo como "${suggested}" (formato padrão .rtf).`
+    );
+    if (!confirmed) return;
+    const saved = await saveNewDocument(currentDoc, html, suggested);
+    if (!saved) return;
   }
 
   showReading();
