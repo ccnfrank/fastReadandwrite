@@ -14,6 +14,14 @@ const searchInput = document.getElementById("search-input");
 const results = document.getElementById("results");
 const newBtn = document.getElementById("new-btn");
 
+// iPhone e iPad não permitem escolher pasta inteira: o botão passa a selecionar arquivos.
+if (/iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1)) {
+  folderInput.removeAttribute("webkitdirectory");
+  folderInput.removeAttribute("directory");
+  folderInput.multiple = true;
+  folderInput.accept = ".html,.rtf,.md,.txt";
+}
+
 const docDialog = document.getElementById("doc-dialog");
 const docTitle = document.getElementById("doc-title");
 const docText = document.getElementById("doc-text");
@@ -41,6 +49,7 @@ const formatButtons = Array.from(document.querySelectorAll(".doc-dialog__format"
 
 const DOCUMENT_PATTERN = /\.(md|txt|rtf|html)$/i;
 const RTF_PATTERN = /\.rtf$/i;
+const MD_PATTERN = /\.md$/i;
 // Tag: "#" seguido de letras, números, "_" ou "-", no início do texto ou após espaço.
 const TAG_PATTERN = /(?:^|\s)#([\p{L}\p{N}_-]+)/gu;
 // Única formatação permitida no texto editado.
@@ -113,14 +122,15 @@ folderInput.addEventListener("change", async () => {
   if (files.length === 0) return;
 
   // O caminho relativo de cada arquivo começa pelo nome da pasta escolhida.
-  const folderName = files[0].webkitRelativePath.split("/")[0];
+  const relative = files[0].webkitRelativePath;
+  const folderName = relative ? relative.split("/")[0] : "Arquivos escolhidos";
   const entries = files
     .filter((file) => DOCUMENT_PATTERN.test(file.name))
     .map((file) => ({
       file,
       handle: null,
       // Caminho dentro da pasta escolhida, sem o nome da própria pasta.
-      path: file.webkitRelativePath.split("/").slice(1).join("/"),
+      path: file.webkitRelativePath ? file.webkitRelativePath.split("/").slice(1).join("/") : file.name,
     }));
   // Sem permissão de escrita neste navegador: a pasta é só para leitura.
   await loadFolder(folderName, entries, null);
@@ -197,11 +207,58 @@ function uniqueName(base, extension) {
   return name;
 }
 
+function mimeTypeFor(name) {
+  if (isHtmlName(name)) return "text/html";
+  if (RTF_PATTERN.test(name)) return "application/rtf";
+  if (MD_PATTERN.test(name)) return "text/markdown";
+  return "text/plain";
+}
+
+function downloadFile(file) {
+  const url = URL.createObjectURL(file);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = file.name;
+  document.body.append(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+// Navegadores sem "salvar como": pede o nome, abre a folha de compartilhamento
+// (no iPhone, "Salvar em Arquivos") ou baixa o arquivo.
+async function saveWithShareOrDownload(doc, html) {
+  const typed = window.prompt("Nome do arquivo (.html, .rtf, .md ou .txt):", doc.name);
+  if (typed === null || typed.trim() === "") return false;
+  const fileName = /\.(html|rtf|md|txt)$/i.test(typed.trim()) ? typed.trim() : `${typed.trim()}.html`;
+
+  const text = buildFileText(fileName, html);
+  const payload = doc.password ? await encryptText(text, doc.password) : text;
+  const file = new File([payload], fileName, { type: mimeTypeFor(fileName) });
+
+  if (navigator.canShare && navigator.canShare({ files: [file] })) {
+    try {
+      await navigator.share({ files: [file], title: fileName });
+    } catch (error) {
+      // Cancelado na folha de compartilhamento: nada foi salvo.
+      return false;
+    }
+  } else {
+    downloadFile(file);
+  }
+
+  doc.name = fileName;
+  doc.handle = null;
+  doc.isNew = false;
+  createdDocs = createdDocs.filter((item) => item !== doc);
+  documents.push(doc);
+  return true;
+}
+
 // Pergunta onde salvar (janela do sistema com pasta e nome) e grava o arquivo novo.
 async function saveNewDocument(doc, html) {
   if (!CAN_SAVE_FILE) {
-    alert("Este navegador não permite salvar arquivos. Use o Chrome ou o Edge.");
-    return false;
+    return saveWithShareOrDownload(doc, html);
   }
 
   let handle;
@@ -212,6 +269,7 @@ async function saveNewDocument(doc, html) {
       types: [
         { description: "Página HTML", accept: { "text/html": [".html"] } },
         { description: "Rich Text", accept: { "application/rtf": [".rtf"] } },
+        { description: "Markdown", accept: { "text/markdown": [".md"] } },
         { description: "Texto", accept: { "text/plain": [".txt"] } },
       ],
     });
@@ -256,12 +314,13 @@ function isHtmlName(name) {
 
 // Formatos que guardam negrito, cor, fonte etc. (.html e .rtf).
 function keepsFormatting(name) {
-  return isHtmlName(name) || RTF_PATTERN.test(name);
+  return isHtmlName(name) || RTF_PATTERN.test(name) || MD_PATTERN.test(name);
 }
 
 // Texto do arquivo a partir do HTML editado: RTF, página completa para .html, ou texto puro.
 function buildFileText(name, html) {
   if (RTF_PATTERN.test(name)) return htmlToRtf(html);
+  if (MD_PATTERN.test(name)) return htmlToMarkdown(html);
   if (!isHtmlName(name)) return htmlToPlain(html);
   return `<!DOCTYPE html>\n<html lang="pt-BR">\n<head>\n<meta charset="UTF-8">\n<title>${textToHtml(name)}</title>\n</head>\n<body>\n${html}\n</body>\n</html>\n`;
 }
@@ -276,6 +335,41 @@ function parseFileText(name, raw) {
   }
   const plain = RTF_PATTERN.test(name) ? stripRtf(raw) : raw;
   return { html: textToHtml(plain), content: plain };
+}
+
+// Markdown: negrito, itálico e riscado. Cor, fonte, tamanho e sublinhado não existem em Markdown.
+function htmlToMarkdown(html) {
+  const wrap = (inner, mark) => {
+    const [, lead, core, trail] = inner.match(/^(\s*)([\s\S]*?)(\s*)$/);
+    return core ? `${lead}${mark}${core}${mark}${trail}` : inner;
+  };
+  const walk = (node) => {
+    if (node.nodeType === Node.TEXT_NODE) return node.nodeValue;
+    if (node.nodeType !== Node.ELEMENT_NODE) return "";
+    if (node.tagName === "BR") return "\n";
+    const inner = Array.from(node.childNodes).map(walk).join("");
+    switch (node.tagName) {
+      case "B":
+      case "STRONG":
+        return wrap(inner, "**");
+      case "I":
+      case "EM":
+        return wrap(inner, "*");
+      case "S":
+      case "STRIKE":
+      case "DEL":
+        return wrap(inner, "~~");
+      case "DIV":
+      case "P":
+        return `${inner}\n`;
+      default:
+        return inner;
+    }
+  };
+  const template = document.createElement("template");
+  template.innerHTML = html;
+  const body = Array.from(template.content.childNodes).map(walk).join("");
+  return body.replace(/\n{3,}/g, "\n\n").trimEnd() + "\n";
 }
 
 // Texto puro de um HTML: quebras de linha para <br>, <div> e <p>.
@@ -891,6 +985,8 @@ async function saveEdit() {
 
   showReading();
   renderResults(searchInput.value);
+  // Depois de salvar, a janela de leitura é fechada.
+  docDialog.close();
 }
 
 // Estado dos botões de formatação segundo o trecho selecionado.
