@@ -39,7 +39,7 @@ const docLockSubmit = document.getElementById("doc-lock-submit");
 const docLockCancel = document.getElementById("doc-lock-cancel");
 const formatButtons = Array.from(document.querySelectorAll(".doc-dialog__format"));
 
-const DOCUMENT_PATTERN = /\.(md|txt|rtf)$/i;
+const DOCUMENT_PATTERN = /\.(md|txt|rtf|html)$/i;
 const RTF_PATTERN = /\.rtf$/i;
 // Tag: "#" seguido de letras, números, "_" ou "-", no início do texto ou após espaço.
 const TAG_PATTERN = /(?:^|\s)#([\p{L}\p{N}_-]+)/gu;
@@ -49,7 +49,8 @@ const ALIGNMENT_PATTERN = /text-align:\s*(left|center|right|justify)/i;
 const FONT_SIZE_PATTERN = /font-size:\s*(\d+(?:\.\d+)?)px/i;
 const FONT_FAMILY_PATTERN = /font-family:\s*([^;]+)/i;
 // Cor só em hexadecimal; "background-color" não conta.
-const TEXT_COLOR_PATTERN = /(?:^|;)\s*color:\s*(#[0-9a-f]{3,8})\b/i;
+// O navegador costuma gravar a cor como rgb(...), então aceitamos hex e rgb.
+const TEXT_COLOR_PATTERN = /(?:^|;)\s*color:\s*(#[0-9a-f]{3,8}\b|rgba?\([^)]*\))/i;
 const CAN_PICK_WRITABLE_FOLDER = typeof window.showDirectoryPicker === "function";
 const CAN_SAVE_FILE = typeof window.showSaveFilePicker === "function";
 // Primeira linha de um arquivo protegido por senha. O restante é o conteúdo cifrado.
@@ -174,7 +175,7 @@ searchInput.addEventListener("input", () => {
 
 newBtn.addEventListener("click", () => {
   const doc = {
-    name: uniqueName("Novo arquivo", ".txt"),
+    name: uniqueName("Novo arquivo", ".html"),
     html: "",
     handle: null,
     isNew: true,
@@ -197,7 +198,7 @@ function uniqueName(base, extension) {
 }
 
 // Pergunta onde salvar (janela do sistema com pasta e nome) e grava o arquivo novo.
-async function saveNewDocument(doc, text) {
+async function saveNewDocument(doc, html) {
   if (!CAN_SAVE_FILE) {
     alert("Este navegador não permite salvar arquivos. Use o Chrome ou o Edge.");
     return false;
@@ -208,13 +209,17 @@ async function saveNewDocument(doc, text) {
     handle = await window.showSaveFilePicker({
       suggestedName: doc.name,
       startIn: rootHandle || "documents",
-      types: [{ description: "Texto", accept: { "text/plain": [".txt"] } }],
+      types: [
+        { description: "Página HTML", accept: { "text/html": [".html"] } },
+        { description: "Texto", accept: { "text/plain": [".txt"] } },
+      ],
     });
   } catch (error) {
     // Cancelado pela pessoa: o arquivo continua aberto e não salvo.
     return false;
   }
 
+  const text = buildFileText(handle.name, html);
   const payload = doc.password ? await encryptText(text, doc.password) : text;
   const writable = await handle.createWritable();
   await writable.write(payload);
@@ -236,8 +241,44 @@ async function readDocument(file) {
     // Protegido: o conteúdo só é lido depois de informar a senha.
     return { name: file.name, locked: true, envelope: raw, html: "", isNew: false, ...indexText("") };
   }
-  const plain = RTF_PATTERN.test(file.name) ? stripRtf(raw) : raw;
-  return { name: file.name, locked: false, html: textToHtml(plain), isNew: false, ...indexText(plain) };
+  const parsed = parseFileText(file.name, raw);
+  return { name: file.name, locked: false, html: parsed.html, isNew: false, ...indexText(parsed.content) };
+}
+
+// ---- Formato do arquivo: .html guarda a formatação; os demais guardam só o texto ----
+
+const HTML_FILE_PATTERN = /\.html$/i;
+
+function isHtmlName(name) {
+  return HTML_FILE_PATTERN.test(name);
+}
+
+// Texto do arquivo a partir do HTML editado: página completa para .html, texto puro para os demais.
+function buildFileText(name, html) {
+  if (!isHtmlName(name)) return htmlToPlain(html);
+  return `<!DOCTYPE html>\n<html lang="pt-BR">\n<head>\n<meta charset="UTF-8">\n<title>${textToHtml(name)}</title>\n</head>\n<body>\n${html}\n</body>\n</html>\n`;
+}
+
+// Lê o texto de um arquivo: devolve o HTML formatado e o texto puro usado na busca.
+function parseFileText(name, raw) {
+  if (isHtmlName(name)) {
+    const parsed = new DOMParser().parseFromString(raw, "text/html");
+    parsed.querySelectorAll("script, style").forEach((node) => node.remove());
+    const html = sanitizeHtml(parsed.body ? parsed.body.innerHTML : "");
+    return { html, content: htmlToPlain(html) };
+  }
+  const plain = RTF_PATTERN.test(name) ? stripRtf(raw) : raw;
+  return { html: textToHtml(plain), content: plain };
+}
+
+// Texto puro de um HTML: quebras de linha para <br>, <div> e <p>.
+function htmlToPlain(html) {
+  const template = document.createElement("template");
+  template.innerHTML = html;
+  const root = template.content;
+  root.querySelectorAll("br").forEach((node) => node.replaceWith("\n"));
+  root.querySelectorAll("div, p").forEach((node) => node.append("\n"));
+  return root.textContent;
 }
 
 // ---- Proteção por senha (AES-GCM, chave derivada com PBKDF2) ----
@@ -299,8 +340,9 @@ async function decryptText(envelope, password) {
 }
 
 // Grava o conteúdo no arquivo de origem, cifrado se houver senha.
-async function writeDocument(doc, plain) {
-  const payload = doc.password ? await encryptText(plain, doc.password) : plain;
+async function writeDocument(doc, html) {
+  const text = buildFileText(doc.name, html);
+  const payload = doc.password ? await encryptText(text, doc.password) : text;
   const writable = await doc.handle.createWritable();
   await writable.write(payload);
   await writable.close();
@@ -339,6 +381,13 @@ function sanitizeHtml(html) {
   return template.innerHTML;
 }
 
+// Converte "#RRGGBB" ou "rgb(r, g, b)" para "#rrggbb".
+function toHexColor(value) {
+  if (value.startsWith("#")) return value.toLowerCase();
+  const [red, green, blue] = value.match(/\d+/g).slice(0, 3).map(Number);
+  return "#" + [red, green, blue].map((n) => n.toString(16).padStart(2, "0")).join("");
+}
+
 function cleanNode(parent) {
   for (const node of Array.from(parent.childNodes)) {
     if (node.nodeType === Node.TEXT_NODE) continue;
@@ -371,7 +420,7 @@ function cleanNode(parent) {
       const family = fontFamily[1].replace(/[^\p{L}\p{N} ,-]/gu, "").trim();
       if (family) declarations.push(`font-family: ${family}`);
     }
-    if (textColor) declarations.push(`color: ${textColor[1].toLowerCase()}`);
+    if (textColor) declarations.push(`color: ${toHexColor(textColor[1])}`);
     if (declarations.length > 0) {
       node.setAttribute("style", declarations.join("; "));
     }
@@ -551,15 +600,16 @@ docLock.addEventListener("submit", async (event) => {
 });
 
 async function unlockDocument(password) {
-  let plain;
+  let raw;
   try {
-    plain = await decryptText(currentDoc.envelope, password);
+    raw = await decryptText(currentDoc.envelope, password);
   } catch (error) {
     docLockError.textContent = "Senha incorreta.";
     return;
   }
-  Object.assign(currentDoc, indexText(plain), {
-    html: textToHtml(plain),
+  const parsed = parseFileText(currentDoc.name, raw);
+  Object.assign(currentDoc, indexText(parsed.content), {
+    html: parsed.html,
     password,
     locked: false,
     envelope: null,
@@ -580,7 +630,7 @@ async function protectDocument(password) {
   // Arquivo novo: a senha vale no próximo "Salvar". Arquivo da pasta: grava já cifrado.
   if (!currentDoc.isNew) {
     try {
-      await writeDocument(currentDoc, currentDoc.content);
+      await writeDocument(currentDoc, currentDoc.html);
     } catch (error) {
       currentDoc.password = previous;
       docLockError.textContent = "Não foi possível gravar o arquivo.";
@@ -691,14 +741,14 @@ async function saveEdit() {
   Object.assign(currentDoc, indexText(plain), { html });
 
   // Arquivo novo: só é considerado salvo quando gravado na pasta escolhida.
-  // Arquivos já existentes: a alteração fica na memória da página, sem gravar no disco.
+  // Arquivos .html e protegidos da pasta são gravados no disco com a formatação.
+  // Os demais (.txt, .md, .rtf) ficam só na memória da página.
   if (currentDoc.isNew) {
-    const saved = await saveNewDocument(currentDoc, plain);
+    const saved = await saveNewDocument(currentDoc, html);
     if (!saved) return;
-  } else if (currentDoc.password && currentDoc.handle) {
-    // Arquivo protegido da pasta: a alteração é gravada já cifrada.
+  } else if (currentDoc.handle && (currentDoc.password || isHtmlName(currentDoc.name))) {
     try {
-      await writeDocument(currentDoc, plain);
+      await writeDocument(currentDoc, html);
     } catch (error) {
       alert("Não foi possível gravar o arquivo protegido.");
       return;
