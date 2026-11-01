@@ -211,6 +211,7 @@ async function saveNewDocument(doc, html) {
       startIn: rootHandle || "documents",
       types: [
         { description: "Página HTML", accept: { "text/html": [".html"] } },
+        { description: "Rich Text", accept: { "application/rtf": [".rtf"] } },
         { description: "Texto", accept: { "text/plain": [".txt"] } },
       ],
     });
@@ -253,8 +254,14 @@ function isHtmlName(name) {
   return HTML_FILE_PATTERN.test(name);
 }
 
-// Texto do arquivo a partir do HTML editado: página completa para .html, texto puro para os demais.
+// Formatos que guardam negrito, cor, fonte etc. (.html e .rtf).
+function keepsFormatting(name) {
+  return isHtmlName(name) || RTF_PATTERN.test(name);
+}
+
+// Texto do arquivo a partir do HTML editado: RTF, página completa para .html, ou texto puro.
 function buildFileText(name, html) {
+  if (RTF_PATTERN.test(name)) return htmlToRtf(html);
   if (!isHtmlName(name)) return htmlToPlain(html);
   return `<!DOCTYPE html>\n<html lang="pt-BR">\n<head>\n<meta charset="UTF-8">\n<title>${textToHtml(name)}</title>\n</head>\n<body>\n${html}\n</body>\n</html>\n`;
 }
@@ -358,12 +365,139 @@ function indexText(plain) {
   };
 }
 
-// Remove comandos e chaves de RTF, deixando só o texto visível (aproximação simples).
+// Grupos do RTF que não são texto (tabelas de fontes e cores, metadados, etc.).
+const RTF_SKIP_GROUPS = /^\\(\*|fonttbl|colortbl|stylesheet|info|pict)/;
+
+// Extrai só o texto visível de um RTF, com quebras de parágrafo.
 function stripRtf(raw) {
-  return raw
-    .replace(/\\[a-z]+-?\d* ?/gi, " ")
-    .replace(/\\[^a-z]/gi, " ")
-    .replace(/[{}]/g, " ");
+  let out = "";
+  let depth = 0;
+  let skipDepth = 0;
+  for (let i = 0; i < raw.length; i++) {
+    const ch = raw[i];
+    if (ch === "{") {
+      depth++;
+      if (!skipDepth && RTF_SKIP_GROUPS.test(raw.slice(i + 1, i + 12))) skipDepth = depth;
+      continue;
+    }
+    if (ch === "}") {
+      if (skipDepth === depth) skipDepth = 0;
+      depth--;
+      continue;
+    }
+    if (skipDepth || ch === "\r" || ch === "\n") continue;
+    if (ch !== "\\") {
+      out += ch;
+      continue;
+    }
+
+    const next = raw[i + 1];
+    if (next === "\\" || next === "{" || next === "}") {
+      out += next;
+      i++;
+    } else if (next === "'") {
+      out += String.fromCharCode(parseInt(raw.slice(i + 2, i + 4), 16));
+      i += 3;
+    } else {
+      const word = /^([a-z]+)(-?\d+)? ?/i.exec(raw.slice(i + 1, i + 40));
+      if (!word) {
+        i++;
+        continue;
+      }
+      i += word[0].length;
+      if (word[1] === "par" || word[1] === "line") out += "\n";
+      if (word[1] === "tab") out += "\t";
+      if (word[1] === "u") {
+        const code = Number(word[2]);
+        out += String.fromCharCode(code < 0 ? code + 65536 : code);
+        i++; // pula o caractere de substituição que segue \u
+      }
+    }
+  }
+  return out;
+}
+
+// ---- Gravação em RTF (negrito, itálico, sublinhado, riscado, cor, fonte, tamanho, alinhamento) ----
+
+const RTF_ALIGN = { left: "\\ql", center: "\\qc", right: "\\qr", justify: "\\qj" };
+const RTF_DEFAULT_FONT = "Figtree";
+
+function escapeRtf(text) {
+  let out = "";
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    const code = text.charCodeAt(i);
+    if (ch === "\\") out += "\\\\";
+    else if (ch === "{") out += "\\{";
+    else if (ch === "}") out += "\\}";
+    else if (ch === "\n") out += "\\line ";
+    else if (code > 127) out += `\\u${code > 32767 ? code - 65536 : code}?`;
+    else out += ch;
+  }
+  return out;
+}
+
+function htmlToRtf(html) {
+  const fonts = new Map([[RTF_DEFAULT_FONT, 0]]);
+  const colors = new Map();
+  const fontIndex = (name) => {
+    if (!fonts.has(name)) fonts.set(name, fonts.size);
+    return fonts.get(name);
+  };
+  const colorIndex = (hex) => {
+    if (!colors.has(hex)) colors.set(hex, colors.size + 1);
+    return colors.get(hex);
+  };
+
+  const walk = (node) => {
+    if (node.nodeType === Node.TEXT_NODE) return escapeRtf(node.nodeValue);
+    if (node.nodeType !== Node.ELEMENT_NODE) return "";
+    if (node.tagName === "BR") return "\\line ";
+
+    const style = node.getAttribute("style") || "";
+    const commands = [];
+    let isBlock = false;
+    switch (node.tagName) {
+      case "B": commands.push("\\b"); break;
+      case "I": commands.push("\\i"); break;
+      case "U": commands.push("\\ul"); break;
+      case "S":
+      case "STRIKE":
+      case "DEL": commands.push("\\strike"); break;
+      case "DIV":
+      case "P":
+        isBlock = true;
+        commands.push("\\pard");
+        break;
+    }
+
+    const align = style.match(ALIGNMENT_PATTERN);
+    if (align) commands.push(RTF_ALIGN[align[1].toLowerCase()]);
+    const color = style.match(/color:\s*#([0-9a-f]{6})\b/i);
+    if (color) commands.push(`\\cf${colorIndex(color[1].toLowerCase())}`);
+    const size = style.match(FONT_SIZE_PATTERN);
+    if (size) commands.push(`\\fs${Math.round(Number(size[1]) * 1.5)}`);
+    const family = style.match(FONT_FAMILY_PATTERN);
+    if (family) commands.push(`\\f${fontIndex(family[1].trim())}`);
+
+    const inner = Array.from(node.childNodes).map(walk).join("");
+    let out = commands.length > 0 ? `{${commands.join(" ")} ${inner}}` : inner;
+    if (isBlock) out += "\\par\n";
+    return out;
+  };
+
+  const template = document.createElement("template");
+  template.innerHTML = html;
+  const body = Array.from(template.content.childNodes).map(walk).join("");
+
+  const fontTable = Array.from(fonts, ([name, index]) =>
+    `{\\f${index}\\fnil ${name.replace(/[^\p{L}\p{N} -]/gu, "")};}`
+  ).join("");
+  const colorTable = Array.from(colors, ([hex]) =>
+    `\\red${parseInt(hex.slice(0, 2), 16)}\\green${parseInt(hex.slice(2, 4), 16)}\\blue${parseInt(hex.slice(4, 6), 16)};`
+  ).join("");
+
+  return `{\\rtf1\\ansi\\ansicpg1252\\deff0{\\fonttbl${fontTable}}{\\colortbl;${colorTable}}\\viewkind4\\uc1\\pard ${body}}`;
 }
 
 function textToHtml(plain) {
@@ -746,7 +880,7 @@ async function saveEdit() {
   if (currentDoc.isNew) {
     const saved = await saveNewDocument(currentDoc, html);
     if (!saved) return;
-  } else if (currentDoc.handle && (currentDoc.password || isHtmlName(currentDoc.name))) {
+  } else if (currentDoc.handle && (currentDoc.password || keepsFormatting(currentDoc.name))) {
     try {
       await writeDocument(currentDoc, html);
     } catch (error) {
