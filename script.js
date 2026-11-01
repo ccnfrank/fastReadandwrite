@@ -791,3 +791,50 @@ function setDocFontSize(size) {
 docFontDown.addEventListener("click", () => setDocFontSize(docFontSize - 1));
 docFontUp.addEventListener("click", () => setDocFontSize(docFontSize + 1));
 setDocFontSize(docFontSize);
+
+// ---- Redimensionar a janela de leitura arrastando o canto ----
+
+const docGrip = document.getElementById("doc-grip");
+const RESIZE_MIN_WIDTH = 320;
+const RESIZE_MIN_HEIGHT = 240;
+let resizeStart = null;
+
+function clamp(value, min, max) {
+  return Math.min(max, Math.max(min, value));
+}
+
+docGrip.addEventListener("pointerdown", (event) => {
+  event.preventDefault();
+  const rect = docDialog.getBoundingClientRect();
+  resizeStart = {
+    x: event.clientX,
+    y: event.clientY,
+    width: rect.width,
+    height: rect.height,
+  };
+  docGrip.setPointerCapture(event.pointerId);
+  docDialog.classList.add("is-resized");
+});
+
+docGrip.addEventListener("pointermove", (event) => {
+  if (!resizeStart) return;
+  const width = clamp(
+    resizeStart.width + (event.clientX - resizeStart.x),
+    RESIZE_MIN_WIDTH,
+    window.innerWidth * 0.96
+  );
+  const height = clamp(
+    resizeStart.height + (event.clientY - resizeStart.y),
+    RESIZE_MIN_HEIGHT,
+    window.innerHeight * 0.94
+  );
+  docDialog.style.width = `${width}px`;
+  docDialog.style.height = `${height}px`;
+});
+
+function endResize() {
+  resizeStart = null;
+}
+
+docGrip.addEventListener("pointerup", endResize);
+docGrip.addEventListener("pointercancel", endResize);

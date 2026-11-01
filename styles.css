@@ -341,6 +341,34 @@ button {
   outline-offset: 2px;
 }
 
+/* Manual resize: drag the grip in the bottom-right corner */
+.doc-dialog__grip {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 22px;
+  height: 22px;
+  display: grid;
+  place-items: center;
+  color: var(--text-muted);
+  cursor: nwse-resize;
+  touch-action: none;
+  border-bottom-right-radius: 20px;
+}
+
+.doc-dialog__grip:hover {
+  color: var(--text);
+}
+
+.doc-dialog.is-resized {
+  max-width: 96vw;
+  max-height: 94vh;
+}
+
+.doc-dialog.is-resized .doc-dialog__body {
+  flex: 1 1 auto;
+}
+
 /* Password panel inside the document window */
 .doc-dialog [hidden] {
   display: none !important;
